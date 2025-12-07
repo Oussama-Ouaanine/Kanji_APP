@@ -1,22 +1,22 @@
-/**
- * Écran de quiz kanji
- */
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, StatusBar } from 'react-native';
 import KanjiService from '../services/KanjiService';
+import { palette, radius, spacing } from '../styles/theme';
+import ProgressService from '../services/ProgressService';
 
 export default function QuizScreen({ route, navigation }) {
-  const { questionCount = 10 } = route.params || {};
+  const { questionCount = 10, level = 'N5' } = route.params || {};
   const [questions, setQuestions] = useState([]);
   const [index, setIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [selected, setSelected] = useState(null);
   const [showResult, setShowResult] = useState(false);
+  const [correctIds, setCorrectIds] = useState([]);
 
   useEffect(() => {
-    const quiz = KanjiService.generateQuiz(questionCount);
+    const quiz = KanjiService.generateQuiz(questionCount, level);
     setQuestions(quiz);
-  }, [questionCount]);
+  }, [questionCount, level]);
 
   if (questions.length === 0) {
     return (
@@ -34,16 +34,31 @@ export default function QuizScreen({ route, navigation }) {
     if (showResult) return;
     setSelected(answer);
     setShowResult(true);
-    if (answer === current.correctAnswer) setScore((prev) => prev + 1);
+    const isGood = answer === current.correctAnswer;
+    if (isGood) {
+      setScore((prev) => prev + 1);
+      setCorrectIds((prev) => [...prev, current.id]);
+    }
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (index < questions.length - 1) {
       setIndex(index + 1);
       setSelected(null);
       setShowResult(false);
     } else {
-      navigation.replace('Results', { score, total: questions.length });
+      const { gainedXp, unlockedNow, newlyMastered } = await ProgressService.recordQuiz({
+        levelId: level,
+        correctIds,
+      });
+      navigation.replace('Results', {
+        score,
+        total: questions.length,
+        level,
+        gainedXp,
+        unlockedNow,
+        newlyMastered,
+      });
     }
   };
 
@@ -54,10 +69,21 @@ export default function QuizScreen({ route, navigation }) {
       <View style={styles.bgBlobB} />
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
+        <View style={styles.topRow}>
+          <View style={styles.topTitles}>
+            <Text style={styles.kicker}>Session kanji</Text>
+            <Text style={styles.screenTitle}>Quiz en douceur</Text>
+          </View>
+          <View style={styles.scorePill}>
+            <Text style={styles.scorePillLabel}>Score</Text>
+            <Text style={styles.scorePillValue}>{score}</Text>
+          </View>
+        </View>
+
+        <View style={styles.progressCard}>
           <View style={styles.progressRow}>
             <Text style={styles.progressLabel}>Question {index + 1} / {questions.length}</Text>
-            <Text style={styles.score}>Score {score}</Text>
+            <Text style={styles.progressHint}>Niveau {level}</Text>
           </View>
           <View style={styles.progressBarBg}>
             <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
@@ -91,7 +117,9 @@ export default function QuizScreen({ route, navigation }) {
                 onPress={() => handleAnswer(answer)}
                 disabled={showResult}
               >
-                <Text style={styles.answerLetter}>{letter}</Text>
+                <View style={styles.answerLetterBox}>
+                  <Text style={styles.answerLetter}>{letter}</Text>
+                </View>
                 <Text style={styles.answerText}>{answer}</Text>
               </TouchableOpacity>
             );
@@ -101,7 +129,7 @@ export default function QuizScreen({ route, navigation }) {
         {showResult && (
           <View style={styles.footer}>
             <Text style={[styles.result, selected === current.correctAnswer ? styles.ok : styles.ko]}>
-              {selected === current.correctAnswer ? '✓ Bonne réponse' : '✗ Réponse incorrecte'}
+              {selected === current.correctAnswer ? 'Bonne réponse' : 'Mauvaise réponse'}
             </Text>
             <Text style={styles.helper}>Touchez « {nextLabel} » pour continuer</Text>
           </View>
@@ -116,17 +144,18 @@ export default function QuizScreen({ route, navigation }) {
         >
           <Text style={styles.nextText}>{nextLabel}</Text>
         </TouchableOpacity>
-        {!showResult && <Text style={styles.helper}>Choisis une réponse pour débloquer la suite</Text>}
+        {!showResult && <Text style={styles.helperMuted}>Choisis une réponse pour débloquer la suite</Text>}
+        {showResult && <Text style={styles.helperMuted}>Niveau {level} • {questions.length} questions</Text>}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f7f8ff' },
-  scrollContent: { padding: 20, paddingBottom: 140 },
-  loaderContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f7f8ff' },
-  loaderText: { color: '#0f172a', fontSize: 16, fontWeight: '600' },
+  container: { flex: 1, backgroundColor: palette.background },
+  scrollContent: { padding: spacing.lg, paddingBottom: spacing.xl + 90, gap: spacing.md },
+  loaderContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.background },
+  loaderText: { color: palette.ink, fontSize: 16, fontWeight: '600' },
   bgBlobA: {
     position: 'absolute',
     top: -140,
@@ -134,8 +163,8 @@ const styles = StyleSheet.create({
     width: 280,
     height: 280,
     borderRadius: 200,
-    backgroundColor: '#ffe8ef',
-    opacity: 0.85,
+    backgroundColor: palette.accentSoft,
+    opacity: 0.55,
   },
   bgBlobB: {
     position: 'absolute',
@@ -144,93 +173,138 @@ const styles = StyleSheet.create({
     width: 320,
     height: 320,
     borderRadius: 200,
-    backgroundColor: '#dff3ff',
-    opacity: 0.9,
+    backgroundColor: palette.surfaceMuted,
+    opacity: 0.7,
   },
-  header: { marginBottom: 18 },
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  topTitles: { gap: 4 },
+  kicker: { color: palette.muted, fontSize: 12, fontWeight: '700' },
+  screenTitle: { color: palette.ink, fontSize: 22, fontWeight: '800' },
+  scorePill: {
+    backgroundColor: palette.surface,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderWidth: 1,
+    borderColor: palette.line,
+    alignItems: 'center',
+  },
+  scorePillLabel: { color: palette.muted, fontSize: 12, fontWeight: '700' },
+  scorePillValue: { color: palette.ink, fontSize: 16, fontWeight: '800' },
+  progressCard: {
+    backgroundColor: palette.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: palette.line,
+    gap: spacing.xs,
+    shadowColor: palette.shadow,
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+  },
   progressRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
   },
-  progressLabel: { fontSize: 15, color: '#475569', fontWeight: '700' },
-  score: { fontSize: 15, fontWeight: '800', color: '#0f172a' },
-  progressBarBg: { height: 10, backgroundColor: '#e2e8f0', borderRadius: 999, overflow: 'hidden' },
-  progressBarFill: { height: '100%', backgroundColor: '#ff6b6b', borderRadius: 999 },
+  progressLabel: { fontSize: 14, color: palette.ink, fontWeight: '800' },
+  progressHint: { fontSize: 12, color: palette.muted, fontWeight: '700' },
+  progressBarBg: { height: 12, backgroundColor: palette.surfaceMuted, borderRadius: radius.pill, overflow: 'hidden' },
+  progressBarFill: { height: '100%', backgroundColor: palette.accent, borderRadius: radius.pill },
   card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 18,
-    padding: 28,
+    backgroundColor: palette.surface,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
     alignItems: 'center',
-    marginBottom: 18,
     borderWidth: 1,
-    borderColor: '#eef2ff',
-    shadowColor: '#cbd5e1',
-    shadowOpacity: 0.25,
+    borderColor: palette.line,
+    shadowColor: palette.shadow,
+    shadowOpacity: 0.16,
     shadowRadius: 16,
-    shadowOffset: { width: 0, height: 12 },
+    shadowOffset: { width: 0, height: 10 },
+    gap: spacing.sm,
   },
-  kanji: { fontSize: 96, fontWeight: '800', color: '#0f172a', marginBottom: 10 },
-  metaRow: { flexDirection: 'row', gap: 8 },
-  chip: { backgroundColor: '#f1f5f9', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
-  chipText: { color: '#0f172a', fontSize: 13, fontWeight: '700' },
-  ask: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginTop: 12, color: '#475569' },
-  answers: { width: '100%', gap: 10 },
+  kanji: { fontSize: 96, fontWeight: '800', color: palette.ink, marginTop: spacing.xs },
+  metaRow: { flexDirection: 'row', gap: spacing.xs },
+  chip: {
+    backgroundColor: palette.surfaceMuted,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: palette.line,
+  },
+  chipText: { color: palette.ink, fontSize: 13, fontWeight: '700' },
+  ask: { fontSize: 16, fontWeight: '700', textAlign: 'center', color: palette.muted, marginTop: spacing.xs },
+  answers: { width: '100%', gap: spacing.sm },
   answer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: palette.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
     borderWidth: 1.5,
-    borderColor: '#e2e8f0',
+    borderColor: palette.line,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    shadowColor: '#cbd5e1',
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
+    gap: spacing.sm,
+    shadowColor: palette.shadow,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
   },
-  answerActive: { borderColor: '#ff6b6b', backgroundColor: '#fff5f7' },
+  answerActive: { borderColor: palette.accent, backgroundColor: palette.accentSoft },
+  answerLetterBox: {
+    width: 30,
+    height: 30,
+    borderRadius: 16,
+    backgroundColor: palette.surfaceMuted,
+    borderWidth: 1,
+    borderColor: palette.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   answerLetter: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#f8fafc',
-    textAlign: 'center',
-    textAlignVertical: 'center',
-    color: '#0f172a',
+    color: palette.ink,
     fontWeight: '800',
   },
-  answerText: { fontSize: 16, color: '#0f172a', flexShrink: 1 },
-  answerCorrect: { backgroundColor: '#ecfdf3', borderColor: '#22c55e' },
-  answerWrong: { backgroundColor: '#fff1f2', borderColor: '#ef4444' },
-  footer: { alignItems: 'center', marginTop: 14, gap: 6 },
-  result: { fontSize: 18, fontWeight: '800' },
-  ok: { color: '#16a34a' },
-  ko: { color: '#dc2626' },
-  helper: { color: '#475569', fontSize: 13 },
+  answerText: { fontSize: 16, color: palette.ink, flexShrink: 1, fontWeight: '700' },
+  answerCorrect: { backgroundColor: '#ecfdf3', borderColor: palette.positive },
+  answerWrong: { backgroundColor: '#fff1f2', borderColor: palette.negative },
+  footer: { alignItems: 'center', marginTop: spacing.sm, gap: 4 },
+  result: { fontSize: 16, fontWeight: '800' },
+  ok: { color: palette.positive },
+  ko: { color: palette.negative },
+  helper: { color: palette.muted, fontSize: 13 },
+  helperMuted: { color: palette.muted, fontSize: 12, textAlign: 'center', marginTop: 6 },
   bottomBar: {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
-    padding: 16,
-    backgroundColor: 'rgba(255,255,255,0.94)',
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
+    bottom: spacing.lg + spacing.md, // lift above device bottom ~3cm
+    padding: spacing.md,
+    marginHorizontal: spacing.md,
+    backgroundColor: palette.surface,
+    borderWidth: 1,
+    borderColor: palette.line,
+    borderRadius: radius.xl,
     gap: 6,
+    shadowColor: palette.shadow,
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
   },
   nextBtn: {
-    backgroundColor: '#ff6b6b',
-    paddingVertical: 16,
-    borderRadius: 14,
+    backgroundColor: palette.accent,
+    paddingVertical: spacing.md,
+    borderRadius: radius.lg,
     alignItems: 'center',
-    shadowColor: '#ff6b6b',
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: palette.accent,
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 10 },
+    borderWidth: 1,
+    borderColor: palette.accent,
   },
-  nextBtnDisabled: { backgroundColor: '#e2e8f0', borderWidth: 1, borderColor: '#cbd5e1', shadowOpacity: 0 },
-  nextText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  nextBtnDisabled: { backgroundColor: palette.surfaceMuted, borderWidth: 1, borderColor: palette.line, shadowOpacity: 0 },
+  nextText: { color: palette.surface, fontSize: 16, fontWeight: '800' },
 });
