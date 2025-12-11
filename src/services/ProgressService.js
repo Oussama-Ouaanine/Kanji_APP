@@ -1,11 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import KanjiService, { LEVELS, KANJI_BANK } from './KanjiService';
+import KanjiService, { LEVELS } from './KanjiService';
 
 const STORAGE_KEY = 'kanji_progress_v1';
 
 const initialState = {
-  currentLevel: 'N5',
-  unlockedLevels: ['N5'],
+  currentLevel: LEVELS[0]?.id || '1',
+  unlockedLevels: [LEVELS[0]?.id || '1'],
   mastery: {}, // { [kanjiId]: correctCount }
   xp: 0,
   streak: 0,
@@ -17,7 +17,7 @@ const masteryThreshold = 2; // times answered correctly to count as "mastered"
 const minSessionsToUnlock = 5; // enforce practice depth before unlock
 
 function getLevelPool(levelId) {
-  return KANJI_BANK.filter(k => k.level === levelId);
+  return KanjiService.getByLevel(levelId);
 }
 
 function getLevelIndex(levelId) {
